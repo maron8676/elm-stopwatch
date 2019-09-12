@@ -23,25 +23,28 @@ main =
 
 
 -- MODEL
--- タイムゾーン　タイマー開始時刻　現在時刻
 
 
 type alias Model =
-    { zone : Time.Zone
-    , startedTime : Maybe Int
-    , endedTime : Maybe Int
-    , time : Time.Posix
+    { time : Time.Posix
+    , termHistory : List Int
+    , timer : Timer
     }
+
+
+type Timer
+    = Initial
+    | Started Int Int
+    | Stop Int Int Int
 
 
 init : () -> ( Model, Cmd Msg )
 init _ =
-    ( { zone = Time.utc
-      , startedTime = Nothing
-      , endedTime = Nothing
-      , time = Time.millisToPosix 0
+    ( { time = Time.millisToPosix 0
+      , termHistory = []
+      , timer = Initial
       }
-    , Task.perform AdjustTimeZone Time.here
+    , Cmd.none
     )
 
 
@@ -51,7 +54,6 @@ init _ =
 
 type Msg
     = Tick Time.Posix
-    | AdjustTimeZone Time.Zone
     | TimerStart
     | TimerEnd
     | TimerReset
@@ -61,29 +63,71 @@ update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
         Tick newTime ->
-            ( { model | time = newTime }
-            , Cmd.none
-            )
-
-        AdjustTimeZone newZone ->
-            ( { model | zone = newZone }
+            ( { model
+                | time = newTime
+              }
             , Cmd.none
             )
 
         TimerStart ->
-            ( { model | startedTime = Just <| Time.posixToMillis model.time }
-            , Cmd.none
-            )
+            case model.timer of
+                Initial ->
+                    ( { model
+                        | timer = Started 0 <| Time.posixToMillis model.time
+                      }
+                    , Cmd.none
+                    )
+
+                Stop splitTime started ended ->
+                    ( { model
+                        | timer = Started (splitTime - started + ended) (Time.posixToMillis model.time)
+                      }
+                    , Cmd.none
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
 
         TimerEnd ->
-            ( { model | endedTime = Just <| Time.posixToMillis model.time }
-            , Cmd.none
-            )
+            case model.timer of
+                Started splitTime started ->
+                    ( { model
+                        | timer = Stop splitTime started (Time.posixToMillis model.time)
+                      }
+                    , Cmd.none
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
 
         TimerReset ->
-            ( { model | startedTime = Nothing, endedTime = Nothing }
-            , Cmd.none
-            )
+            case model.timer of
+                Started splitTime started ->
+                    ( { model
+                        | timer = Initial
+                        , termHistory =
+                            List.append model.termHistory
+                                [ splitTime - started + Time.posixToMillis model.time ]
+                      }
+                    , Cmd.none
+                    )
+
+                Stop splitTime started ended ->
+                    ( { model
+                        | timer = Initial
+                        , termHistory =
+                            List.append model.termHistory
+                                [ splitTime - started + ended ]
+                      }
+                    , Cmd.none
+                    )
+
+                _ ->
+                    ( { model
+                        | timer = Initial
+                      }
+                    , Cmd.none
+                    )
 
 
 
@@ -101,27 +145,46 @@ subscriptions model =
 
 view : Model -> Html Msg
 view model =
-    div []
-        [ viewElapseTime (Time.posixToMillis model.time) model.startedTime model.endedTime
-        , button [ onClick TimerStart ] [ text "start" ]
-        , button [ onClick TimerEnd ] [ text "end" ]
-        , button [ onClick TimerReset ] [ text "reset" ]
-        ]
+    div [] <|
+        List.append
+            [ viewElapseTime (Time.posixToMillis model.time) model.timer
+            , button [ onClick TimerStart ] [ text "start" ]
+            , button [ onClick TimerEnd ] [ text "end" ]
+            , button [ onClick TimerReset ] [ text "reset" ]
+            , h3 [] [ text "History" ]
+            ]
+        <|
+            List.map
+                (\x -> div [] [ text <| formatTerm x ])
+                model.termHistory
 
 
-viewElapseTime : Int -> Maybe Int -> Maybe Int -> Html Msg
-viewElapseTime now mStarted mEnded =
-    case ( mStarted, mEnded ) of
-        ( Nothing, _ ) ->
-            div [] []
+viewElapseTime : Int -> Timer -> Html Msg
+viewElapseTime now timer =
+    case timer of
+        Initial ->
+            div [] [ text "0:0:0.0" ]
 
-        ( Just started, Nothing ) ->
-            div [] [ text <| Round.round 1 <| calcSecDiff now started ]
+        Started splitTime started ->
+            div [] [ text <| formatTerm <| (splitTime + now - started) ]
 
-        ( Just started, Just ended ) ->
-            div [] [ text <| Round.round 1 <| calcSecDiff ended started ]
+        Stop splitTime started ended ->
+            div [] [ text <| formatTerm <| (splitTime + ended - started) ]
 
 
-calcSecDiff : Int -> Int -> Float
-calcSecDiff ended started =
-    toFloat (ended - started) / 1000
+formatTerm : Int -> String
+formatTerm time =
+    let
+        hours =
+            String.fromInt <| time // 3600000
+
+        minutes =
+            String.fromInt <| modBy 3600000 time // 60000
+
+        seconds =
+            String.fromInt <| modBy 60000 time // 1000
+
+        milliseconds =
+            Round.floor 0 <| toFloat (modBy 1000 (time + 50)) / 100
+    in
+    String.join ":" [ hours, minutes, seconds ] ++ "." ++ milliseconds
