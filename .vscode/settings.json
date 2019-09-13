@@ -4,7 +4,6 @@
         "posix"
     ],
     "elm.makeSpecialFile": "src/Main.elm",
-    "elm.analyseEnabled": true,
     "elm.includeParamsInUserAutocomplete": true,
     "elm.includeUserFunctionDocumentation": true,
     "editor.formatOnSave": true

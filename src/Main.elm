@@ -26,7 +26,7 @@ main =
 
 
 type alias Model =
-    { time : Time.Posix
+    { now : Time.Posix
     , termHistory : List Int
     , timer : Timer
     }
@@ -40,7 +40,7 @@ type Timer
 
 init : () -> ( Model, Cmd Msg )
 init _ =
-    ( { time = Time.millisToPosix 0
+    ( { now = Time.millisToPosix 0
       , termHistory = []
       , timer = Initial
       }
@@ -64,7 +64,7 @@ update msg model =
     case msg of
         Tick newTime ->
             ( { model
-                | time = newTime
+                | now = newTime
               }
             , Cmd.none
             )
@@ -73,14 +73,14 @@ update msg model =
             case model.timer of
                 Initial ->
                     ( { model
-                        | timer = Started 0 <| Time.posixToMillis model.time
+                        | timer = Started 0 <| Time.posixToMillis model.now
                       }
                     , Cmd.none
                     )
 
                 Stop splitTime started ended ->
                     ( { model
-                        | timer = Started (splitTime - started + ended) (Time.posixToMillis model.time)
+                        | timer = Started (splitTime - started + ended) (Time.posixToMillis model.now)
                       }
                     , Cmd.none
                     )
@@ -92,7 +92,7 @@ update msg model =
             case model.timer of
                 Started splitTime started ->
                     ( { model
-                        | timer = Stop splitTime started (Time.posixToMillis model.time)
+                        | timer = Stop splitTime started (Time.posixToMillis model.now)
                       }
                     , Cmd.none
                     )
@@ -107,7 +107,7 @@ update msg model =
                         | timer = Initial
                         , termHistory =
                             List.append model.termHistory
-                                [ splitTime - started + Time.posixToMillis model.time ]
+                                [ splitTime - started + Time.posixToMillis model.now ]
                       }
                     , Cmd.none
                     )
@@ -147,7 +147,7 @@ view : Model -> Html Msg
 view model =
     div [] <|
         List.append
-            [ viewElapseTime (Time.posixToMillis model.time) model.timer
+            [ viewElapseTime (Time.posixToMillis model.now) model.timer
             , button [ onClick TimerStart ] [ text "start" ]
             , button [ onClick TimerEnd ] [ text "end" ]
             , button [ onClick TimerReset ] [ text "reset" ]
