@@ -20,7 +20,7 @@ import Time
 main =
     Browser.element
         { init = init
-        , view = neatView
+        , view = view
         , update = update
         , subscriptions = subscriptions
         }
@@ -40,7 +40,7 @@ type alias Model =
 type Timer
     = Initial
     | Started Int Int
-    | Stop Int Int Int
+    | Stop Int
 
 
 init : () -> ( Model, Cmd Msg )
@@ -83,9 +83,9 @@ update msg model =
                     , Cmd.none
                     )
 
-                Stop splitTime started ended ->
+                Stop splitTime ->
                     ( { model
-                        | timer = Started (splitTime - started + ended) (Time.posixToMillis model.now)
+                        | timer = Started splitTime (Time.posixToMillis model.now)
                       }
                     , Cmd.none
                     )
@@ -97,7 +97,7 @@ update msg model =
             case model.timer of
                 Started splitTime started ->
                     ( { model
-                        | timer = Stop splitTime started (Time.posixToMillis model.now)
+                        | timer = Stop <| splitTime - started + Time.posixToMillis model.now
                       }
                     , Cmd.none
                     )
@@ -117,12 +117,12 @@ update msg model =
                     , Cmd.none
                     )
 
-                Stop splitTime started ended ->
+                Stop splitTime ->
                     ( { model
                         | timer = Initial
                         , termHistory =
                             List.append model.termHistory
-                                [ splitTime - started + ended ]
+                                [ splitTime ]
                       }
                     , Cmd.none
                     )
@@ -146,35 +146,6 @@ subscriptions model =
 
 
 -- VIEW
-
-
-view : Model -> Html Msg
-view model =
-    div [] <|
-        List.append
-            [ viewElapseTime (Time.posixToMillis model.now) model.timer
-            , button [ class "button", class "is-success", onClick TimerStart ] [ text "start" ]
-            , button [ class "button", onClick TimerEnd ] [ text "end" ]
-            , button [ class "button", class "is-warning", onClick TimerReset ] [ text "reset" ]
-            , div [ class "title" ] [ text "History" ]
-            ]
-        <|
-            List.map
-                (\x -> div [] [ text <| formatTerm x ])
-                model.termHistory
-
-
-viewElapseTime : Int -> Timer -> Html Msg
-viewElapseTime now timer =
-    case timer of
-        Initial ->
-            div [] [ text "0:0:0.0" ]
-
-        Started splitTime started ->
-            div [] [ text <| formatTerm <| (splitTime + now - started) ]
-
-        Stop splitTime started ended ->
-            div [] [ text <| formatTerm <| (splitTime + ended - started) ]
 
 
 formatTerm : Int -> String
@@ -206,8 +177,8 @@ myPadding =
         }
 
 
-neatView : Model -> Html Msg
-neatView model =
+view : Model -> Html Msg
+view model =
     div [] <|
         Neat.toPage <|
             Neat.setBoundary myPadding <|
@@ -217,7 +188,7 @@ neatView model =
                             | horizontal = Neat.Layout.Row.HCenter
                         }
                         [ Neat.fromNoPadding myPadding <|
-                            neatViewElapseTime (Time.posixToMillis model.now) model.timer
+                            viewElapseTime (Time.posixToMillis model.now) model.timer
                         ]
                     , Neat.Layout.row <|
                         [ Neat.fromNoPadding myPadding <|
@@ -255,8 +226,8 @@ neatView model =
                     ]
 
 
-neatViewElapseTime : Int -> Timer -> Neat.View Neat.NoPadding Msg
-neatViewElapseTime now timer =
+viewElapseTime : Int -> Timer -> Neat.View Neat.NoPadding Msg
+viewElapseTime now timer =
     case timer of
         Initial ->
             Neat.div [] [ Neat.text "0:0:0.0" ]
@@ -264,5 +235,5 @@ neatViewElapseTime now timer =
         Started splitTime started ->
             Neat.div [] [ Neat.text <| formatTerm <| (splitTime + now - started) ]
 
-        Stop splitTime started ended ->
-            Neat.div [] [ Neat.text <| formatTerm <| (splitTime + ended - started) ]
+        Stop splitTime ->
+            Neat.div [] [ Neat.text <| formatTerm splitTime ]
