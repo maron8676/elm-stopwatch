@@ -32,21 +32,23 @@ main =
 type alias Model =
     { now : Time.Posix
     , termHistory : List Int
-    , mainTimer : Timer
+    , mainSubTimer : MainSubTimer
     }
 
 
-type Timer
+type MainSubTimer
     = Initial
-    | Started Int Int
-    | Stop Int
+    | MainStarted ( Int, Int ) Int
+    | SubStarted ( Int, Int ) Int
+    | MainStop ( Int, Int )
+    | SubStop ( Int, Int )
 
 
 init : () -> ( Model, Cmd Msg )
 init _ =
     ( { now = Time.millisToPosix 0
       , termHistory = []
-      , mainTimer = Initial
+      , mainSubTimer = Initial
       }
     , Cmd.none
     )
@@ -61,6 +63,7 @@ type Msg
     | TimerStart
     | TimerEnd
     | TimerReset
+    | TimerSwitch
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -76,26 +79,29 @@ update msg model =
             )
 
         TimerStart ->
-            case model.mainTimer of
+            case model.mainSubTimer of
                 Initial ->
                     ( { model
-                        | mainTimer = Started 0 nowPosix
+                        | mainSubTimer = MainStarted ( 0, 0 ) nowPosix
                       }
                     , Cmd.none
                     )
 
-                Stop splitTime ->
-                    ( { model | mainTimer = Started splitTime nowPosix }
+                MainStop splitTime ->
+                    ( { model | mainSubTimer = MainStarted splitTime nowPosix }
                     , Cmd.none
                     )
 
                 _ ->
                     ( model, Cmd.none )
 
+        TimerSwitch ->
+            ( model, Cmd.none )
+
         TimerEnd ->
-            case model.mainTimer of
-                Started splitTime started ->
-                    ( { model | mainTimer = Stop <| splitTime - started + nowPosix }
+            case model.mainSubTimer of
+                MainStarted ( mainSplitTime, subSplitTime ) started ->
+                    ( { model | mainSubTimer = MainStop ( mainSplitTime - started + nowPosix, subSplitTime ) }
                     , Cmd.none
                     )
 
@@ -103,10 +109,10 @@ update msg model =
                     ( model, Cmd.none )
 
         TimerReset ->
-            case model.mainTimer of
-                Started splitTime started ->
+            case model.mainSubTimer of
+                MainStarted ( splitTime, _ ) started ->
                     ( { model
-                        | mainTimer = Initial
+                        | mainSubTimer = Initial
                         , termHistory =
                             List.append model.termHistory
                                 [ splitTime - started + nowPosix ]
@@ -114,9 +120,9 @@ update msg model =
                     , Cmd.none
                     )
 
-                Stop splitTime ->
+                MainStop ( splitTime, _ ) ->
                     ( { model
-                        | mainTimer = Initial
+                        | mainSubTimer = Initial
                         , termHistory =
                             List.append model.termHistory
                                 [ splitTime ]
@@ -126,7 +132,7 @@ update msg model =
 
                 _ ->
                     ( { model
-                        | mainTimer = Initial
+                        | mainSubTimer = Initial
                       }
                     , Cmd.none
                     )
@@ -202,7 +208,7 @@ view model =
                         { defaultRow | horizontal = Neat.Layout.Row.HCenter }
                       <|
                         List.map addMyPadding
-                            [ viewElapseTime (Time.posixToMillis model.now) model.mainTimer ]
+                            [ viewElapseTime (Time.posixToMillis model.now) model.mainSubTimer ]
                     , Neat.Layout.row <|
                         List.map addMyPadding
                             [ startButton, endButton, resetButton ]
@@ -216,17 +222,20 @@ view model =
                     ]
 
 
-viewElapseTime : Int -> Timer -> Neat.View Neat.NoPadding Msg
+viewElapseTime : Int -> MainSubTimer -> Neat.View Neat.NoPadding Msg
 viewElapseTime now timer =
     case timer of
         Initial ->
             Neat.div [] [ Neat.text "0:0:0.0" ]
 
-        Started splitTime started ->
+        MainStarted ( splitTime, _ ) started ->
             Neat.div [] [ Neat.text <| formatTerm <| (splitTime + now - started) ]
 
-        Stop splitTime ->
+        MainStop ( splitTime, _ ) ->
             Neat.div [] [ Neat.text <| formatTerm splitTime ]
+
+        _ ->
+            Neat.div [] []
 
 
 termDiv : Int -> Neat.View Neat.NoPadding Msg
@@ -248,6 +257,17 @@ startButton =
         , Mixin.fromAttribute <| onClick TimerStart
         ]
         [ Neat.text "start" ]
+
+
+switchButton : Neat.View Neat.NoPadding Msg
+switchButton =
+    Neat.lift button
+        [ Mixin.class "button"
+        , Mixin.class "is-success"
+        , Mixin.fromAttribute <| style "width" "100px"
+        , Mixin.fromAttribute <| onClick TimerSwitch
+        ]
+        [ Neat.text "switch" ]
 
 
 endButton : Neat.View Neat.NoPadding Msg
