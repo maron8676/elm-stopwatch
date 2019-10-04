@@ -1,15 +1,13 @@
 module Main exposing (main)
 
 import Browser
-import Html exposing (..)
-import Html.Attributes exposing (..)
-import Html.Events exposing (..)
+import Html exposing (Html, button, div)
+import Html.Attributes exposing (style)
+import Html.Events exposing (onClick)
 import Mixin
 import Neat
 import Neat.Layout
 import Neat.Layout.Row exposing (defaultRow)
-import Round
-import Task
 import Time
 
 
@@ -17,6 +15,7 @@ import Time
 -- MAIN
 
 
+main : Platform.Program () Model Msg
 main =
     Browser.element
         { init = init
@@ -33,7 +32,7 @@ main =
 type alias Model =
     { now : Time.Posix
     , termHistory : List Int
-    , timer : Timer
+    , mainTimer : Timer
     }
 
 
@@ -47,7 +46,7 @@ init : () -> ( Model, Cmd Msg )
 init _ =
     ( { now = Time.millisToPosix 0
       , termHistory = []
-      , timer = Initial
+      , mainTimer = Initial
       }
     , Cmd.none
     )
@@ -66,27 +65,27 @@ type Msg
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
+    let
+        nowPosix =
+            Time.posixToMillis model.now
+    in
     case msg of
         Tick newTime ->
-            ( { model
-                | now = newTime
-              }
+            ( { model | now = newTime }
             , Cmd.none
             )
 
         TimerStart ->
-            case model.timer of
+            case model.mainTimer of
                 Initial ->
                     ( { model
-                        | timer = Started 0 <| Time.posixToMillis model.now
+                        | mainTimer = Started 0 nowPosix
                       }
                     , Cmd.none
                     )
 
                 Stop splitTime ->
-                    ( { model
-                        | timer = Started splitTime (Time.posixToMillis model.now)
-                      }
+                    ( { model | mainTimer = Started splitTime nowPosix }
                     , Cmd.none
                     )
 
@@ -94,11 +93,9 @@ update msg model =
                     ( model, Cmd.none )
 
         TimerEnd ->
-            case model.timer of
+            case model.mainTimer of
                 Started splitTime started ->
-                    ( { model
-                        | timer = Stop <| splitTime - started + Time.posixToMillis model.now
-                      }
+                    ( { model | mainTimer = Stop <| splitTime - started + nowPosix }
                     , Cmd.none
                     )
 
@@ -106,20 +103,20 @@ update msg model =
                     ( model, Cmd.none )
 
         TimerReset ->
-            case model.timer of
+            case model.mainTimer of
                 Started splitTime started ->
                     ( { model
-                        | timer = Initial
+                        | mainTimer = Initial
                         , termHistory =
                             List.append model.termHistory
-                                [ splitTime - started + Time.posixToMillis model.now ]
+                                [ splitTime - started + nowPosix ]
                       }
                     , Cmd.none
                     )
 
                 Stop splitTime ->
                     ( { model
-                        | timer = Initial
+                        | mainTimer = Initial
                         , termHistory =
                             List.append model.termHistory
                                 [ splitTime ]
@@ -129,7 +126,7 @@ update msg model =
 
                 _ ->
                     ( { model
-                        | timer = Initial
+                        | mainTimer = Initial
                       }
                     , Cmd.none
                     )
@@ -140,28 +137,42 @@ update msg model =
 
 
 subscriptions : Model -> Sub Msg
-subscriptions model =
-    Time.every 100 Tick
+subscriptions _ =
+    Time.every (toFloat timeUnit) Tick
 
 
 
 -- VIEW
 
 
+timeUnit : Int
+timeUnit =
+    100
+
+
 formatTerm : Int -> String
 formatTerm time =
     let
+        millisec1Hour =
+            3600000
+
+        millisec1Minute =
+            60000
+
+        millisec1Second =
+            1000
+
         hours =
-            String.fromInt <| time // 3600000
+            String.fromInt <| time // millisec1Hour
 
         minutes =
-            String.fromInt <| modBy 3600000 time // 60000
+            String.fromInt <| modBy millisec1Hour time // millisec1Minute
 
         seconds =
-            String.fromInt <| modBy 60000 time // 1000
+            String.fromInt <| modBy millisec1Minute time // millisec1Second
 
         milliseconds =
-            Round.floor 0 <| toFloat (modBy 1000 (time + 50)) / 100
+            String.fromInt <| modBy millisec1Second (time + timeUnit // 2) // timeUnit
     in
     String.join ":" [ hours, minutes, seconds ] ++ "." ++ milliseconds
 
@@ -179,49 +190,28 @@ myPadding =
 
 view : Model -> Html Msg
 view model =
+    let
+        addMyPadding =
+            Neat.fromNoPadding myPadding
+    in
     div [] <|
         Neat.toPage <|
             Neat.setBoundary myPadding <|
                 Neat.Layout.column <|
                     [ Neat.Layout.rowWith
-                        { defaultRow
-                            | horizontal = Neat.Layout.Row.HCenter
-                        }
-                        [ Neat.fromNoPadding myPadding <|
-                            viewElapseTime (Time.posixToMillis model.now) model.timer
-                        ]
+                        { defaultRow | horizontal = Neat.Layout.Row.HCenter }
+                      <|
+                        List.map addMyPadding
+                            [ viewElapseTime (Time.posixToMillis model.now) model.mainTimer ]
                     , Neat.Layout.row <|
-                        [ Neat.fromNoPadding myPadding <|
-                            Neat.lift button
-                                [ Mixin.class "button"
-                                , Mixin.class "is-success"
-                                , Mixin.fromAttribute <| style "width" "100px"
-                                , Mixin.fromAttribute <| onClick TimerStart
-                                ]
-                                [ Neat.text "start" ]
-                        , Neat.fromNoPadding myPadding <|
-                            Neat.lift button
-                                [ Mixin.class "button"
-                                , Mixin.fromAttribute <| style "width" "100px"
-                                , Mixin.fromAttribute <| onClick TimerEnd
-                                ]
-                                [ Neat.text "end" ]
-                        , Neat.fromNoPadding myPadding <|
-                            Neat.lift button
-                                [ Mixin.class "button"
-                                , Mixin.class "is-warning"
-                                , Mixin.fromAttribute <| style "width" "100px"
-                                , Mixin.fromAttribute <| onClick TimerReset
-                                ]
-                                [ Neat.text "reset" ]
-                        ]
+                        List.map addMyPadding
+                            [ startButton, endButton, resetButton ]
                     , Neat.Layout.row <|
-                        [ Neat.fromNoPadding myPadding <|
-                            Neat.div [ Mixin.class "title" ] [ Neat.text "History" ]
-                        ]
+                        List.map addMyPadding
+                            [ historyTitle ]
                     , Neat.Layout.row <|
                         List.map
-                            (\x -> Neat.fromNoPadding myPadding <| Neat.div [] [ Neat.text <| formatTerm x ])
+                            (addMyPadding << termDiv)
                             model.termHistory
                     ]
 
@@ -237,3 +227,45 @@ viewElapseTime now timer =
 
         Stop splitTime ->
             Neat.div [] [ Neat.text <| formatTerm splitTime ]
+
+
+termDiv : Int -> Neat.View Neat.NoPadding Msg
+termDiv x =
+    Neat.div [] [ Neat.text <| formatTerm x ]
+
+
+historyTitle : Neat.View Neat.NoPadding Msg
+historyTitle =
+    Neat.div [ Mixin.class "title" ] [ Neat.text "History" ]
+
+
+startButton : Neat.View Neat.NoPadding Msg
+startButton =
+    Neat.lift button
+        [ Mixin.class "button"
+        , Mixin.class "is-success"
+        , Mixin.fromAttribute <| style "width" "100px"
+        , Mixin.fromAttribute <| onClick TimerStart
+        ]
+        [ Neat.text "start" ]
+
+
+endButton : Neat.View Neat.NoPadding Msg
+endButton =
+    Neat.lift button
+        [ Mixin.class "button"
+        , Mixin.fromAttribute <| style "width" "100px"
+        , Mixin.fromAttribute <| onClick TimerEnd
+        ]
+        [ Neat.text "end" ]
+
+
+resetButton : Neat.View Neat.NoPadding Msg
+resetButton =
+    Neat.lift button
+        [ Mixin.class "button"
+        , Mixin.class "is-warning"
+        , Mixin.fromAttribute <| style "width" "100px"
+        , Mixin.fromAttribute <| onClick TimerReset
+        ]
+        [ Neat.text "reset" ]

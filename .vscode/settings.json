@@ -1,10 +1,12 @@
 {
     "cSpell.words": [
         "fuzzer",
+        "millisec",
         "posix"
     ],
     "elm.makeSpecialFile": "src/Main.elm",
     "elm.includeParamsInUserAutocomplete": true,
     "elm.includeUserFunctionDocumentation": true,
-    "editor.formatOnSave": true
+    "editor.formatOnSave": true,
+    "elm.analyseEnabled": true
 }
