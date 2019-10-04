@@ -31,17 +31,23 @@ main =
 
 type alias Model =
     { now : Time.Posix
-    , termHistory : List Int
+    , termHistory : List SplitTimes
     , mainSubTimer : MainSubTimer
+    }
+
+
+type alias SplitTimes =
+    { mainSplitTime : Int
+    , subSplitTime : Int
     }
 
 
 type MainSubTimer
     = Initial
-    | MainStarted ( Int, Int ) Int
-    | SubStarted ( Int, Int ) Int
-    | MainStop ( Int, Int )
-    | SubStop ( Int, Int )
+    | MainStarted SplitTimes Int
+    | SubStarted SplitTimes Int
+    | MainStop SplitTimes
+    | SubStop SplitTimes
 
 
 init : () -> ( Model, Cmd Msg )
@@ -61,7 +67,7 @@ init _ =
 type Msg
     = Tick Time.Posix
     | TimerStart
-    | TimerEnd
+    | TimerStop
     | TimerReset
     | TimerSwitch
 
@@ -71,6 +77,11 @@ update msg model =
     let
         nowPosix =
             Time.posixToMillis model.now
+
+        timerStopSwitchStart =
+            update TimerStart
+                << (Tuple.first << update TimerSwitch)
+                << (Tuple.first << update TimerStop)
     in
     case msg of
         Tick newTime ->
@@ -82,13 +93,18 @@ update msg model =
             case model.mainSubTimer of
                 Initial ->
                     ( { model
-                        | mainSubTimer = MainStarted ( 0, 0 ) nowPosix
+                        | mainSubTimer = MainStarted (SplitTimes 0 0) nowPosix
                       }
                     , Cmd.none
                     )
 
-                MainStop splitTime ->
-                    ( { model | mainSubTimer = MainStarted splitTime nowPosix }
+                MainStop splitTimes ->
+                    ( { model | mainSubTimer = MainStarted splitTimes nowPosix }
+                    , Cmd.none
+                    )
+
+                SubStop splitTimes ->
+                    ( { model | mainSubTimer = SubStarted splitTimes nowPosix }
                     , Cmd.none
                     )
 
@@ -96,12 +112,43 @@ update msg model =
                     ( model, Cmd.none )
 
         TimerSwitch ->
-            ( model, Cmd.none )
-
-        TimerEnd ->
             case model.mainSubTimer of
-                MainStarted ( mainSplitTime, subSplitTime ) started ->
-                    ( { model | mainSubTimer = MainStop ( mainSplitTime - started + nowPosix, subSplitTime ) }
+                MainStarted _ _ ->
+                    timerStopSwitchStart model
+
+                SubStarted _ _ ->
+                    timerStopSwitchStart model
+
+                MainStop splitTimes ->
+                    ( { model | mainSubTimer = SubStop splitTimes }
+                    , Cmd.none
+                    )
+
+                SubStop splitTimes ->
+                    ( { model | mainSubTimer = MainStop splitTimes }
+                    , Cmd.none
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        TimerStop ->
+            case model.mainSubTimer of
+                MainStarted splitTimes started ->
+                    ( { model
+                        | mainSubTimer =
+                            MainStop
+                                { splitTimes | mainSplitTime = splitTimes.mainSplitTime - started + nowPosix }
+                      }
+                    , Cmd.none
+                    )
+
+                SubStarted splitTimes started ->
+                    ( { model
+                        | mainSubTimer =
+                            SubStop
+                                { splitTimes | subSplitTime = splitTimes.subSplitTime - started + nowPosix }
+                      }
                     , Cmd.none
                     )
 
@@ -110,22 +157,38 @@ update msg model =
 
         TimerReset ->
             case model.mainSubTimer of
-                MainStarted ( splitTime, _ ) started ->
+                MainStarted splitTimes started ->
                     ( { model
                         | mainSubTimer = Initial
                         , termHistory =
-                            List.append model.termHistory
-                                [ splitTime - started + nowPosix ]
+                            model.termHistory
+                                ++ [ { splitTimes | mainSplitTime = splitTimes.mainSplitTime - started + nowPosix } ]
                       }
                     , Cmd.none
                     )
 
-                MainStop ( splitTime, _ ) ->
+                MainStop splitTimes ->
+                    ( { model
+                        | mainSubTimer = Initial
+                        , termHistory = model.termHistory ++ [ splitTimes ]
+                      }
+                    , Cmd.none
+                    )
+
+                SubStarted splitTimes started ->
                     ( { model
                         | mainSubTimer = Initial
                         , termHistory =
-                            List.append model.termHistory
-                                [ splitTime ]
+                            model.termHistory
+                                ++ [ { splitTimes | subSplitTime = splitTimes.subSplitTime - started + nowPosix } ]
+                      }
+                    , Cmd.none
+                    )
+
+                SubStop splitTimes ->
+                    ( { model
+                        | mainSubTimer = Initial
+                        , termHistory = model.termHistory ++ [ splitTimes ]
                       }
                     , Cmd.none
                     )
@@ -211,36 +274,59 @@ view model =
                             [ viewElapseTime (Time.posixToMillis model.now) model.mainSubTimer ]
                     , Neat.Layout.row <|
                         List.map addMyPadding
-                            [ startButton, endButton, resetButton ]
+                            [ startButton, switchButton, endButton, resetButton ]
                     , Neat.Layout.row <|
                         List.map addMyPadding
                             [ historyTitle ]
-                    , Neat.Layout.row <|
-                        List.map
-                            (addMyPadding << termDiv)
-                            model.termHistory
+                    , Neat.Layout.row [ addMyPadding <| Neat.div [] [ Neat.text "main sub" ] ]
                     ]
+                        ++ List.map
+                            (Neat.Layout.row << List.singleton << addMyPadding << termDiv)
+                            model.termHistory
 
 
 viewElapseTime : Int -> MainSubTimer -> Neat.View Neat.NoPadding Msg
 viewElapseTime now timer =
     case timer of
         Initial ->
-            Neat.div [] [ Neat.text "0:0:0.0" ]
+            Neat.div [] [ Neat.text <| String.join " " [ "0:0:0.0", "0:0:0.0" ] ]
 
-        MainStarted ( splitTime, _ ) started ->
-            Neat.div [] [ Neat.text <| formatTerm <| (splitTime + now - started) ]
+        MainStarted { mainSplitTime, subSplitTime } started ->
+            Neat.div []
+                [ Neat.text <|
+                    String.join " " <|
+                        List.map formatTerm [ mainSplitTime + now - started, subSplitTime ]
+                ]
 
-        MainStop ( splitTime, _ ) ->
-            Neat.div [] [ Neat.text <| formatTerm splitTime ]
+        MainStop { mainSplitTime, subSplitTime } ->
+            Neat.div []
+                [ Neat.text <|
+                    String.join " " <|
+                        List.map formatTerm [ mainSplitTime, subSplitTime ]
+                ]
 
-        _ ->
-            Neat.div [] []
+        SubStarted { mainSplitTime, subSplitTime } started ->
+            Neat.div []
+                [ Neat.text <|
+                    String.join " " <|
+                        List.map formatTerm [ mainSplitTime, subSplitTime + now - started ]
+                ]
+
+        SubStop { mainSplitTime, subSplitTime } ->
+            Neat.div []
+                [ Neat.text <|
+                    String.join " " <|
+                        List.map formatTerm [ mainSplitTime, subSplitTime ]
+                ]
 
 
-termDiv : Int -> Neat.View Neat.NoPadding Msg
-termDiv x =
-    Neat.div [] [ Neat.text <| formatTerm x ]
+termDiv : SplitTimes -> Neat.View Neat.NoPadding Msg
+termDiv splitTimes =
+    Neat.div []
+        [ Neat.text <|
+            String.join " " <|
+                List.map formatTerm [ splitTimes.mainSplitTime, splitTimes.subSplitTime ]
+        ]
 
 
 historyTitle : Neat.View Neat.NoPadding Msg
@@ -263,7 +349,6 @@ switchButton : Neat.View Neat.NoPadding Msg
 switchButton =
     Neat.lift button
         [ Mixin.class "button"
-        , Mixin.class "is-success"
         , Mixin.fromAttribute <| style "width" "100px"
         , Mixin.fromAttribute <| onClick TimerSwitch
         ]
@@ -275,7 +360,7 @@ endButton =
     Neat.lift button
         [ Mixin.class "button"
         , Mixin.fromAttribute <| style "width" "100px"
-        , Mixin.fromAttribute <| onClick TimerEnd
+        , Mixin.fromAttribute <| onClick TimerStop
         ]
         [ Neat.text "end" ]
 
