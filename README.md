@@ -5,6 +5,9 @@
 1. endで計測中断
 1. resetで計測終了+履歴に記録
 
+## バージョン
+Elm 0.19.0
+
 ## ビルド
 ```
 elm make src\Main.elm --output output\elm.js
