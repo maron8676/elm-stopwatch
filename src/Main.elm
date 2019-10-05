@@ -2,8 +2,9 @@ module Main exposing (main)
 
 import Browser
 import Html exposing (Html, button, div)
-import Html.Attributes exposing (style)
-import Html.Events exposing (onClick)
+import Html.Attributes exposing (contenteditable, style)
+import Html.Events exposing (on, onClick, preventDefaultOn)
+import Json.Decode
 import Mixin
 import Neat
 import Neat.Layout
@@ -31,13 +32,21 @@ main =
 
 type alias Model =
     { now : Time.Posix
-    , termHistory : List SplitTimes
+    , termHistory : List TitledSplitTimes
     , mainSubTimer : MainSubTimer
+    , title : String
     }
 
 
 type alias SplitTimes =
     { mainSplitTime : Int
+    , subSplitTime : Int
+    }
+
+
+type alias TitledSplitTimes =
+    { title : String
+    , mainSplitTime : Int
     , subSplitTime : Int
     }
 
@@ -55,6 +64,7 @@ init _ =
     ( { now = Time.millisToPosix 0
       , termHistory = []
       , mainSubTimer = Initial
+      , title = "title"
       }
     , Cmd.none
     )
@@ -66,10 +76,12 @@ init _ =
 
 type Msg
     = Tick Time.Posix
+    | UpdateTitle String
     | TimerStart
     | TimerStop
     | TimerReset
     | TimerSwitch
+    | NoOp
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -88,6 +100,14 @@ update msg model =
             ( { model | now = newTime }
             , Cmd.none
             )
+
+        UpdateTitle newTitle ->
+            ( { model | title = newTitle }
+            , Cmd.none
+            )
+
+        NoOp ->
+            ( model, Cmd.none )
 
         TimerStart ->
             case model.mainSubTimer of
@@ -158,11 +178,15 @@ update msg model =
         TimerReset ->
             case model.mainSubTimer of
                 MainStarted splitTimes started ->
+                    let
+                        mainSplitTime =
+                            splitTimes.mainSplitTime - started + nowPosix
+                    in
                     ( { model
                         | mainSubTimer = Initial
                         , termHistory =
                             model.termHistory
-                                ++ [ { splitTimes | mainSplitTime = splitTimes.mainSplitTime - started + nowPosix } ]
+                                ++ [ TitledSplitTimes model.title mainSplitTime splitTimes.subSplitTime ]
                       }
                     , Cmd.none
                     )
@@ -170,17 +194,23 @@ update msg model =
                 MainStop splitTimes ->
                     ( { model
                         | mainSubTimer = Initial
-                        , termHistory = model.termHistory ++ [ splitTimes ]
+                        , termHistory =
+                            model.termHistory
+                                ++ [ TitledSplitTimes model.title splitTimes.mainSplitTime splitTimes.subSplitTime ]
                       }
                     , Cmd.none
                     )
 
                 SubStarted splitTimes started ->
+                    let
+                        subSplitTime =
+                            splitTimes.subSplitTime - started + nowPosix
+                    in
                     ( { model
                         | mainSubTimer = Initial
                         , termHistory =
                             model.termHistory
-                                ++ [ { splitTimes | subSplitTime = splitTimes.subSplitTime - started + nowPosix } ]
+                                ++ [ TitledSplitTimes model.title splitTimes.mainSplitTime subSplitTime ]
                       }
                     , Cmd.none
                     )
@@ -188,7 +218,9 @@ update msg model =
                 SubStop splitTimes ->
                     ( { model
                         | mainSubTimer = Initial
-                        , termHistory = model.termHistory ++ [ splitTimes ]
+                        , termHistory =
+                            model.termHistory
+                                ++ [ TitledSplitTimes model.title splitTimes.mainSplitTime splitTimes.subSplitTime ]
                       }
                     , Cmd.none
                     )
@@ -257,6 +289,16 @@ myPadding =
         }
 
 
+enterCode : Int
+enterCode =
+    13
+
+
+isEnterCode : Int -> Bool
+isEnterCode code =
+    code == enterCode
+
+
 view : Model -> Html Msg
 view model =
     let
@@ -271,7 +313,19 @@ view model =
                         { defaultRow | horizontal = Neat.Layout.Row.HCenter }
                       <|
                         List.map addMyPadding
-                            [ viewElapseTime (Time.posixToMillis model.now) model.mainSubTimer ]
+                            [ Neat.div
+                                [ Mixin.fromAttributes
+                                    [ contenteditable True
+                                    , preventDefaultOn "keydown"
+                                        (Json.Decode.map (\x -> ( NoOp, isEnterCode x )) <| Html.Events.keyCode)
+                                    , on "blur" <|
+                                        Json.Decode.map UpdateTitle
+                                            (Json.Decode.at [ "target", "textContent" ] Json.Decode.string)
+                                    ]
+                                ]
+                                [ Neat.text model.title ]
+                            , viewElapseTime (Time.posixToMillis model.now) model.mainSubTimer
+                            ]
                     , Neat.Layout.row <|
                         List.map addMyPadding
                             [ startButton, switchButton, endButton, resetButton ]
@@ -320,12 +374,12 @@ viewElapseTime now timer =
                 ]
 
 
-termDiv : SplitTimes -> Neat.View Neat.NoPadding Msg
+termDiv : TitledSplitTimes -> Neat.View Neat.NoPadding Msg
 termDiv splitTimes =
     Neat.div []
         [ Neat.text <|
             String.join " " <|
-                List.map formatTerm [ splitTimes.mainSplitTime, splitTimes.subSplitTime ]
+                [ splitTimes.title, formatTerm splitTimes.mainSplitTime, formatTerm splitTimes.subSplitTime ]
         ]
 
 
